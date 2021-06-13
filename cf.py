@@ -61,8 +61,8 @@ print("index of the popular restaurant: ", popular_rest)
 corr_popular_rest = corr_matrix[popular_rest]
 corr_popular_rest.shape
 print(corr_popular_rest.shape)
-print(list(restaurant_names[(corr_popular_rest < 1.0) & (corr_popular_rest > 0.9)]))
-
+print(list(restaurants_list[(corr_popular_rest < 1.0) & (corr_popular_rest > 0.9)]))
+print(restaurants_list)
 # # svd = SVD()
 # #
 # # # Run 5-fold cross-validation and print results

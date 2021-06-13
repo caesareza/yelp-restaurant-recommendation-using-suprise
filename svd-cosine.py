@@ -10,8 +10,8 @@ import seaborn as sns
 import statsmodels.api as sm
 sns.set(style="whitegrid", context='talk')
 
-businesses = pd.read_csv('../yelp/yelp_academic_dataset_business.csv', nrows=35000)
-reviews = pd.read_csv('../yelp/yelp_academic_dataset_review.csv', nrows=35000)
+businesses = pd.read_csv('../yelp/yelp_academic_dataset_business.csv', nrows=10000)
+reviews = pd.read_csv('../yelp/yelp_academic_dataset_review.csv', nrows=10000)
 
 restoran = businesses[['business_id','name','address', 'categories', 'attributes','stars']]
 mask_restaurants = restoran['categories'].str.contains('Restaurants')
@@ -25,11 +25,8 @@ review = reviews[['review_id','business_id','user_id','text']]
 combined_business_data = pd.merge(restaurants_and_food, review, on='business_id')
 # print(reviews.columns)
 
-from surprise import Reader, Dataset, KNNWithMeans
-from surprise.model_selection.validation import cross_validate
-reader = Reader()
 combined_business_data.rename(columns = {'stars':'rating'}, inplace = True)
-data = combined_business_data[['user_id', 'business_id', 'text', 'rating']];
+data = combined_business_data[['user_id', 'business_id', 'name', 'text', 'rating']];
 # map floating point stars to an integer
 mapper = {1.0:1,1.5:2, 2.0:2, 2.5:3, 3.0:3, 3.5:4, 4.0:4, 4.5:5, 5.0:5}
 data['rating'] = data['rating'].map(mapper)
@@ -59,7 +56,7 @@ data['text'] = data['text'].apply(remove_punctation)
 data[['polarity', 'subjectivity']] = data['text'].apply(lambda x:TextBlob(x).sentiment).to_list()
 # print(data.nlargest(5, ['polarity']))
 # print(data.nsmallest(5, ['polarity']))
-data = data.nlargest(500, ['polarity'])
+data = data.nlargest(10, ['polarity'])
 
 for var in ['polarity', 'subjectivity']:
     plt.figure(figsize=(12,4))
@@ -71,58 +68,18 @@ for var in ['polarity', 'subjectivity']:
     plt.title(f'Histogram of {var} by true sentiment');
     # plt.show()
 
+# print(data.head(10))
 
-data = Dataset.load_from_df(data[['user_id', 'business_id', 'rating']], reader)
-
-from collections import defaultdict
-from surprise import SVD
+from surprise import KNNBaseline
+from surprise import Dataset
+from surprise import Reader
 from surprise import accuracy
-from surprise.model_selection import KFold
-from surprise import KNNBasic, KNNBaseline
-
-from surprise.model_selection.split import train_test_split
-trainset, testset = train_test_split(data, test_size=0.2)
-
-sim_options = {'name': 'cosine',
-               'user_based': True
-               }
+reader = Reader()
+data = Dataset.load_from_df(data[['user_id', 'business_id', 'rating']], reader)
+trainset = data.build_full_trainset()
+sim_options = {'name': 'pearson_baseline', 'user_based': False}
 algo = KNNBaseline(k=10, sim_options=sim_options)
-dataUnique = combined_business_data.drop_duplicates(subset="name")
-predictions = algo.fit(trainset).test(testset)
+algo.fit(trainset)
+
 accuracy.rmse(predictions)
-result = pd.DataFrame(predictions)
-result.drop(columns = {'details'}, inplace = True)
-print(result.head())
-
-# tampil = pd.Series(dataUnique.index)
-# for r in result:
-#     print(r[r['uid']])
-
-# result = result.join(dataUnique,on='iid')
-
-# est = sm.OLS(trainset, testset)
-
-def get_top_n(predictions, restaurant):
-    """Return the top-N recommendation for each user from a set of predictions.
-
-    Args:
-        predictions(list of Prediction objects): The list of predictions, as
-            returned by the test method of an algorithm.
-        n(int): The number of recommendation to output for each user. Default
-            is 10.
-
-    Returns:
-    A dict where keys are user (raw) ids and values are lists of tuples:
-        [(raw item id, rating estimation), ...] of size n.
-    """
-
-    # First map the predictions to each user.
-    top_n = []
-    i = 10
-    for uid, iid, true_r, est, _ in predictions:
-        top_n.append(dataUnique[dataUnique['business_id'] == iid])
-    print(top_n)
-
-# get_top_n(predictions, dataUnique)
-
 
