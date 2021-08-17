@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from textblob import TextBlob
 
 businesses = pd.read_csv('../yelp/yelp_academic_dataset_business.csv', nrows=10000)
 reviews = pd.read_csv('../yelp/yelp_academic_dataset_review.csv', nrows=10000)
@@ -14,73 +15,68 @@ restaurants_and_food = restoran[mask_restaurants & mask_food]
 restaurants_and_food.drop_duplicates(subset='name', keep=False, inplace=True)
 # print(restaurants_and_food.head(50))
 
-review = reviews[['review_id','business_id','user_id']]
+review = reviews[['review_id','business_id','user_id', 'text']]
 combined_business_data = pd.merge(restaurants_and_food, review, on='business_id')
-print(combined_business_data.head(5))
-print(combined_business_data.shape)
-print(reviews.columns)
+combined_business_data.rename(columns = {'stars':'rating'}, inplace = True)
+data = combined_business_data[['user_id', 'business_id', 'name', 'text', 'rating']]
+mapper = {1.0:1,1.5:2, 2.0:2, 2.5:3, 3.0:3, 3.5:4, 4.0:4, 4.5:5, 5.0:5}
+data['rating'] = data['rating'].map(mapper)
+data['sentiment'] = data['rating'].apply(lambda rating: +1 if rating > 3 else 0)
+
+data['sentimentt'] = data['sentiment'].replace({0 : 'negative'})
+data['sentimentt'] = data['sentimentt'].replace({1 : 'positive'})
+print(data.head())
+
+#split train test
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(data['text'], data['sentiment'], test_size=0.2, random_state=1, stratify=data['sentimentt'])
+
+# Append sentiment back using indices
+train = pd.concat([X_train, y_train], axis=1)
+test = pd.concat([X_test, y_test], axis=1)
+
+# Check dimensions
+print(f"Train: {train.shape[0]} rows and {train.shape[1]} columns")
+print(f"{train['sentiment'].value_counts()}\n")
+print(f"Test: {test.shape[0]} rows and {test.shape[1]} columns")
+print(test['sentiment'].value_counts())
+
+print(train.head())
+# print(data['sentimentt'].value_counts())
+
+# data = data[data['rating'] != 3]
+# print(data.head(10))
+# print(data['sentimentt'].value_counts())
+
+def remove_punctation(text):
+  final = "".join(u for u in text if u not in ("?", ".", ";", ":", "(", ")", "!", '"'))
+  return final
+
+train['text'] = train['text'].apply(remove_punctation)
+train[['polarity', 'subjectivity']] = train['text'].apply(lambda x:TextBlob(x).sentiment).to_list()
+
+print(train.head())
+
+from sklearn.metrics import classification_report, mean_squared_error
+train['blob_polarity'] = np.where(train['polarity']>0, 1, 0)
+target_names=['negative', 'positive']
+print(classification_report(train['sentiment'],
+                            train['blob_polarity'],
+                            target_names=target_names))
+print('RMSE = ',mean_squared_error(train['sentiment'], train['blob_polarity']))
+
+train = train[train['polarity'] > 0]
+print(train.head())
 
 from surprise import Dataset
 from surprise import Reader
 reader = Reader()
-data = Dataset.load_from_df(reviews[['user_id', 'business_id', 'stars']], reader)
+train = Dataset.load_from_df(train[['text', 'sentiment', 'blob_polarity']], reader)
 
 from surprise import SVD
 from surprise.model_selection import cross_validate
+
 svd = SVD(verbose=True, n_epochs=10)
-cross_validate(svd, data, measures=['RMSE', 'MAE'], cv=3, verbose=True)
-
-trainset = data.build_full_trainset()
+cross_validate(svd, train, measures=['RMSE', 'MAE'], cv=3, verbose=True)
+trainset = train.build_full_trainset()
 svd.fit(trainset)
-
-print(svd.predict(uid='eSQ3z93DlzkpXK_H6MFEMw', iid='pQeaRpvuhoEqudo3uymHIQ'))
-
-# import difflib
-# import random
-#
-#
-# def get_book_id(restaurant_name, metadata):
-#     """
-#     Gets the restaurant ID for a book title based on the closest match in the metadata dataframe.
-#     """
-#     existing_titles = list(metadata['name'].values)
-#     closest_titles = difflib.get_close_matches(restaurant_name, existing_titles)
-#     business_id = metadata[metadata['name'] == closest_titles[0]]['name'].values[0]
-#     return business_id
-#
-#
-# def get_book_info(business_id, metadata):
-#     """
-#     Returns some basic information about a book given the book id and the metadata dataframe.
-#     """
-#
-#     restaurant_info = metadata[metadata['business_id'] == business_id][['business_id', 'name', 'categories']]
-#     return restaurant_info.to_dict(orient='records')
-#
-# def predict_review(user_id, business_name, model, metadata):
-#     """
-#     Predicts the review (on a scale of 1-5) that a user would assign to a specific book.
-#     """
-#
-#     business_id = get_book_id(business_name, metadata)
-#     review_prediction = model.predict(uid=user_id, iid=business_id)
-#     return review_prediction.est
-#
-#
-# def generate_recommendation(user_id, model, metadata, thresh=4):
-#     """
-#     Generates a book recommendation for a user based on a rating threshold. Only
-#     books with a predicted rating at or above the threshold will be recommended
-#     """
-#
-#     restaurant_names = list(metadata['name'].values)
-#     random.shuffle(restaurant_names)
-#
-#     for restaurant_name in restaurant_names:
-#         rating = predict_review(user_id, restaurant_name, model, metadata)
-#         print(rating )
-#         # if rating >= thresh:
-#         #     business_id = get_book_id(restaurant_name, metadata)
-#         #     return get_book_info(business_id, metadata)
-#
-# print(generate_recommendation('eSQ3z93DlzkpXK_H6MFEMw', svd, businesses))
